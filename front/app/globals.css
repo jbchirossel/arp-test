@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Variables CSS pour les thèmes */
+:root {
+  /* Mode clair par défaut */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8fafc;
+  --bg-tertiary: #f1f5f9;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --border-primary: #e2e8f0;
+  --border-secondary: #cbd5e1;
+  --accent-primary: #8c68d8;
+  --accent-secondary: #7f49e8;
+  --accent-tertiary: #7a5bc4;
+  --accent-quaternary: #9d7ce8;
+  --accent-quinary: #6b46c1;
+  --shadow-primary: rgba(0, 0, 0, 0.1);
+  --shadow-secondary: rgba(0, 0, 0, 0.05);
+}
+
+/* Mode sombre */
+.dark {
+  --bg-primary: #0f0d1a;
+  --bg-secondary: #1a1628;
+  --bg-tertiary: #1a0f2a;
+  --text-primary: #ffffff;
+  --text-secondary: #e2e8f0;
+  --text-muted: #94a3b8;
+  --border-primary: rgba(255, 255, 255, 0.2);
+  --border-secondary: rgba(255, 255, 255, 0.1);
+  --accent-primary: #8c68d8;
+  --accent-secondary: #7f49e8;
+  --accent-tertiary: #7a5bc4;
+  --accent-quaternary: #9d7ce8;
+  --accent-quinary: #6b46c1;
+  --shadow-primary: rgba(0, 0, 0, 0.3);
+  --shadow-secondary: rgba(0, 0, 0, 0.2);
+}
+
+/* Classes utilitaires pour les thèmes */
+.bg-theme-primary {
+  background-color: var(--bg-primary);
+}
+
+.bg-theme-secondary {
+  background-color: var(--bg-secondary);
+}
+
+.bg-theme-tertiary {
+  background-color: var(--bg-tertiary);
+}
+
+.text-theme-primary {
+  color: var(--text-primary);
+}
+
+.text-theme-secondary {
+  color: var(--text-secondary);
+}
+
+.text-theme-muted {
+  color: var(--text-muted);
+}
+
+.border-theme-primary {
+  border-color: var(--border-primary);
+}
+
+.border-theme-secondary {
+  border-color: var(--border-secondary);
+}
+
+.shadow-theme-primary {
+  box-shadow: 0 4px 6px -1px var(--shadow-primary);
+}
+
+.shadow-theme-secondary {
+  box-shadow: 0 2px 4px -1px var(--shadow-secondary);
+}
+
+/* Animation de transition pour le changement de thème */
+* {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+@layer base {
+  html {
+    font-family: system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded-md font-medium transition-colors duration-200;
+  }
+  
+  .btn-primary {
+    @apply bg-primary-600 text-white hover:bg-primary-700 focus:ring-2 focus:ring-primary-500 focus:ring-offset-2;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-200 text-gray-900 hover:bg-gray-300 focus:ring-2 focus:ring-gray-500 focus:ring-offset-2;
+  }
+  
+  .input {
+    @apply block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm;
+  }
+  
+  .card {
+    @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6;
+  }
+} 
