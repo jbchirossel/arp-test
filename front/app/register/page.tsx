@@ -5,45 +5,57 @@ import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import Notification, { useNotification } from '../components/Notification';
 import ThemeToggle from '../components/ThemeToggle';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function Register() {
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [formData, setFormData] = useState({
     username: '',
     email: '',
     first_name: '',
     last_name: '',
     password: '',
+    confirmPassword: '',
   });
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
   const { notification, showNotification, hideNotification } = useNotification();
+  const { signUp } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
+
+    // Vérification de la confirmation du mot de passe
+    if (formData.password !== formData.confirmPassword) {
+      showNotification('error', 'Erreur', 'Les mots de passe ne correspondent pas');
+      setIsLoading(false);
+      return;
+    }
+
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
-      });
-      
-      if (response.ok) {
-        showNotification('success', 'Compte créé !', 'Votre compte a été créé avec succès. Vous pouvez maintenant vous connecter.');
+      const { error } = await signUp(
+        formData.email,
+        formData.password,
+        {
+          first_name: formData.first_name,
+          last_name: formData.last_name,
+          username: formData.username,
+        }
+      );
+
+      if (!error) {
+        showNotification('success', 'Compte créé !', 'Votre compte a été créé avec succès. Vérifiez votre email pour confirmer votre compte.');
         setTimeout(() => {
           router.push('/login');
-        }, 2000);
+        }, 3000);
       } else {
-        const errorData = await response.json();
-        showNotification('error', 'Erreur', errorData.detail || 'Erreur lors de la création du compte');
+        showNotification('error', 'Erreur', error.message || 'Erreur lors de la création du compte');
       }
     } catch (error) {
       console.error('Error:', error);
-      showNotification('error', 'Erreur', 'Une erreur est survenue lors de la connexion au serveur');
+      showNotification('error', 'Erreur', 'Une erreur est survenue lors de la création du compte');
     } finally {
       setIsLoading(false);
     }
@@ -177,6 +189,34 @@ export default function Register() {
                     className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white"
                   >
                     {showPassword ? (
+                      <EyeOff className="h-5 w-5" />
+                    ) : (
+                      <Eye className="h-5 w-5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Confirmer le mot de passe
+                </label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    id="confirmPassword"
+                    value={formData.confirmPassword}
+                    onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                    className="w-full px-4 py-3 bg-white/40 dark:bg-white/20 border border-white/50 dark:border-white/30 rounded-xl text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-purple-500 focus:border-transparent focus:bg-white/60 dark:focus:bg-white/30 pr-12"
+                    placeholder="Confirmez votre mot de passe"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white"
+                  >
+                    {showConfirmPassword ? (
                       <EyeOff className="h-5 w-5" />
                     ) : (
                       <Eye className="h-5 w-5" />

@@ -1,12 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, CheckSquare, Square, Archive, RotateCcw, Filter, Search, Plus, Calendar, User, Clock, Tag, X, Minus, Wrench, Settings, FileText, AlertTriangle, RefreshCw } from 'lucide-react';
+import { ArrowLeft, CheckSquare, Square, Archive, RotateCcw, Filter, Search, Plus, Calendar, User, Clock, Tag, X, Minus, Wrench, Settings, FileText, AlertTriangle, RefreshCw, LayoutDashboard, BarChart3, LogOut, Sun, Moon, MessageSquare, Edit3, Package, Cpu, FileSpreadsheet, Printer, Users } from 'lucide-react';
 import ThemeToggle from '../components/ThemeToggle';
 import ProfileAvatar from '../components/ProfileAvatar';
 import Notification, { useNotification } from '../components/Notification';
 import TodoList from '../gantt/components/TodoList';
+import { getMyAssignments, createAssignment, toggleAssignment, getChecklistItems, getGanttData } from '@/lib/supabase-gantt';
+import AuthGuard from '../components/AuthGuard';
+import { useAuth } from '../contexts/AuthContext';
 
 type Todo = {
   id: number;
@@ -31,9 +34,119 @@ type SimpleTodo = {
 
 
 
+// Composant HamburgerMenu (même pattern que sur Gantt)
+type MenuItem = {
+  label: string;
+  href: string;
+  icon?: React.ReactNode;
+  description?: string;
+};
+
+type HamburgerMenuProps = {
+  items: MenuItem[];
+  className?: string;
+};
+
+function HamburgerMenu({ items, className }: HamburgerMenuProps) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const router = useRouter();
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      const insideButton = !!containerRef.current && containerRef.current.contains(target);
+      const insidePanel = !!panelRef.current && panelRef.current.contains(target);
+      if (insideButton || insidePanel) return;
+      setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    function handleEsc(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  return (
+    <div ref={containerRef} className={`relative ${className || ""}`}>
+      {!open && (
+      <button
+        aria-label="Ouvrir le menu"
+        onClick={() => setOpen((v) => !v)}
+        className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-white/20 bg-white/10 backdrop-blur text-gray-800 dark:text-white hover:bg-white/20 transition"
+      >
+        <span className="sr-only">Menu</span>
+        <div className="flex flex-col gap-1.5">
+          <span className="block h-0.5 w-6 bg-current"></span>
+          <span className="block h-0.5 w-6 bg-current"></span>
+          <span className="block h-0.5 w-6 bg-current"></span>
+        </div>
+      </button>
+      )}
+
+      {mounted && open && (
+        <>
+          <div
+            className="fixed inset-0 z-[2147483645] bg-black/40 backdrop-blur-sm"
+            onClick={() => setOpen(false)}
+          />
+          <nav ref={panelRef} className="fixed top-0 left-0 z-[2147483646] h-screen w-72 border-r border-white/20 bg-white/10 backdrop-blur p-4 flex flex-col">
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Navigation</span>
+              <button
+                onClick={() => setOpen(false)}
+                className="rounded-md px-2 py-1 text-xs text-gray-700 dark:text-gray-200 hover:bg-white/20"
+                aria-label="Fermer le menu"
+              >
+                Fermer
+              </button>
+            </div>
+            <ul className="flex-1 overflow-y-auto pr-1">
+              {items.map((item) => (
+                <li key={item.href}>
+                  <a
+                    href={item.href}
+                    className="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-800 dark:text-gray-100 hover:bg-white/20 cursor-pointer"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      router.push(item.href);
+                      setOpen(false);
+                    }}
+                  >
+                    {item.icon && <span className="text-gray-700 dark:text-gray-200">{item.icon}</span>}
+                    <div className="flex flex-col">
+                      <span className="font-medium">{item.label}</span>
+                      {item.description && (
+                        <span className="text-[11px] text-gray-600 dark:text-gray-400">{item.description}</span>
+                      )}
+                    </div>
+                  </a>
+                </li>
+              ))}
+            </ul>
+            <div className="pt-2 text-[11px] text-gray-600 dark:text-gray-400">© ARP</div>
+          </nav>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function TodoPage() {
   const router = useRouter();
   const { notification, showNotification, hideNotification } = useNotification();
+  const { user, profile, session, signOut, loading, role: userRole } = useAuth();
   
   const [todos, setTodos] = useState<Todo[]>([]);
   const [archived, setArchived] = useState<Todo[]>([]);
@@ -42,15 +155,15 @@ export default function TodoPage() {
   const [taskWeeks, setTaskWeeks] = useState<Record<number, { start: number; end: number }>>({});
 
   const [showArchive, setShowArchive] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'completed'>('all');
   const [filterPriority, setFilterPriority] = useState<'all' | 'low' | 'medium' | 'high'>('all');
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [fullName, setFullName] = useState('');
-  const [username, setUsername] = useState('');
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
   const [newTodo, setNewTodo] = useState('');
   const [selectedTask, setSelectedTask] = useState<number | null>(null);
   const [collapsedCardIds, setCollapsedCardIds] = useState<Record<number, boolean>>({});
@@ -59,52 +172,68 @@ export default function TodoPage() {
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [searchModalTerm, setSearchModalTerm] = useState('');
 
+  const fullName = profile ? `${profile.first_name} ${profile.last_name}`.trim() : '';
+  const username = profile?.email?.split('@')[0] || '';
+  const role = userRole;
+
+  // Gérer le thème au chargement (même logique que Dashboard)
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      router.replace('/login');
-      return;
+    const savedTheme = typeof window !== 'undefined' ? localStorage.getItem('theme') : null;
+    const systemDark = typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)').matches : false;
+    const shouldBeDark = savedTheme === 'dark' || (!savedTheme && systemDark);
+    setIsDarkMode(!!shouldBeDark);
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('dark', !!shouldBeDark);
     }
+  }, []);
 
-    // Récupérer les infos utilisateur
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    .then(async res => {
-      if (!res.ok) throw new Error();
-      const user = await res.json();
-      setFullName(`${user.first_name} ${user.last_name}`.trim());
-      setUsername(user.username);
-    })
-    .catch(() => {
-      showNotification('error', 'Erreur de session', 'Votre session a expiré. Veuillez vous reconnecter.');
-      setTimeout(() => router.replace('/login'), 1500);
-    });
+  const toggleTheme = () => {
+    const newDarkMode = !isDarkMode;
+    setIsDarkMode(newDarkMode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('theme', newDarkMode ? 'dark' : 'light');
+    }
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('dark', newDarkMode);
+    }
+  };
 
-    fetchTodos();
-  }, [refresh]);
+  // Fermer le menu utilisateur si clic extérieur
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setShowUserMenu(false);
+      }
+    }
+    if (showUserMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showUserMenu]);
+
+  const handleLogout = async () => {
+    await signOut?.();
+    showNotification('success', 'Déconnexion', 'Vous avez été déconnecté avec succès.');
+    setTimeout(() => {
+      router.replace('/login');
+    }, 800);
+  };
+
+  useEffect(() => {
+    if (profile) {
+      fetchTodos();
+    }
+  }, [refresh, profile]);
 
   const fetchTodos = async () => {
-    setLoading(true);
+    setIsLoading(true);
     setError('');
     try {
-      const token = localStorage.getItem('token');
-      if (!token) throw new Error('Non connecté');
-      
-      // Récupérer uniquement les assignments assignés à l'utilisateur connecté
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/my-assignments`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (!res.ok) {
-        throw new Error('Erreur de récupération des todos');
-      }
-      
-      const data: Todo[] = await res.json();
+      const data: any = await getMyAssignments();
       setTodos(data);
 
       // Charger les todos détaillées pour chaque tâche liée
-      const uniqueTaskIds = Array.from(new Set((data || []).map((t: Todo) => t.task_id).filter((id: number | undefined): id is number => typeof id === 'number')));
+      const uniqueTaskIds: number[] = Array.from(new Set((data || []).map((t: Todo) => t.task_id).filter((id: number | undefined): id is number => typeof id === 'number')));
       if (uniqueTaskIds.length > 0) {
         await Promise.all([
           loadTaskTodos(uniqueTaskIds),
@@ -117,7 +246,7 @@ export default function TodoPage() {
       console.error('Erreur fetchTodos:', err);
       setError(err.message || 'Erreur');
     }
-    setLoading(false);
+    setIsLoading(false);
   };
 
   const toggleCollapsedCard = (todoId: number) => {
@@ -125,22 +254,21 @@ export default function TodoPage() {
   };
 
   const loadTaskTodos = async (taskIds: number[]) => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
     const newLoading: Record<number, boolean> = {};
     taskIds.forEach(id => { newLoading[id] = true; });
     setLoadingTaskTodos(prev => ({ ...prev, ...newLoading }));
 
     try {
       const results = await Promise.all(taskIds.map(async (taskId) => {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/task/${taskId}/checklist`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (!res.ok) return { taskId, todos: [] as SimpleTodo[] };
-        const data = await res.json();
-        const list: SimpleTodo[] = (data || [])
-          .map((t: any) => ({ id: t.id, text: t.text, done: t.done }));
-        return { taskId, todos: list };
+        try {
+          const items = await getChecklistItems(taskId);
+          const list: SimpleTodo[] = (items || [])
+            .map((t) => ({ id: t.id, text: t.text, done: t.done }));
+          return { taskId, todos: list };
+        } catch (error) {
+          console.error(`Error loading checklist for task ${taskId}:`, error);
+          return { taskId, todos: [] as SimpleTodo[] };
+        }
       }));
 
       const mapUpdate: Record<number, SimpleTodo[]> = {};
@@ -184,16 +312,10 @@ export default function TodoPage() {
   };
 
   const loadTaskWeeks = async (taskIds: number[]) => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/data`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await getGanttData(2025);
       const map: Record<number, { start: number; end: number }> = {};
-      (data.tasks || []).forEach((t: any) => {
+      (data.tasks || []).forEach((t) => {
         if (taskIds.includes(t.id)) {
           map[t.id] = { start: t.start_week, end: t.end_week };
         }
@@ -201,8 +323,8 @@ export default function TodoPage() {
       if (Object.keys(map).length > 0) {
         setTaskWeeks(prev => ({ ...prev, ...map }));
       }
-    } catch (_) {
-      // silencieux
+    } catch (error) {
+      console.error('Error loading task weeks:', error);
     }
   };
 
@@ -340,30 +462,21 @@ export default function TodoPage() {
     const text = newTodo.trim();
     if (!text) return;
 
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/todos`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          text,
-          done: false,
-          task_id: selectedTask,
-        }),
-      });
-
-      if (res.ok) {
-        const newTodoItem = await res.json();
-        setTodos(prev => [...prev, newTodoItem]);
-        setNewTodo('');
-        setSelectedTask(null);
-        showNotification('success', 'Succès', 'Tâche ajoutée avec succès');
+      if (!selectedTask) {
+        showNotification('error', 'Erreur', 'Veuillez sélectionner une tâche liée');
+        return;
       }
+      const newTodoItem: any = await createAssignment({
+        title: text,
+        description: '',
+        task_id: selectedTask,
+        user_id: profile!.id,
+      } as any);
+      setTodos(prev => [...prev, newTodoItem]);
+      setNewTodo('');
+      setSelectedTask(null);
+      showNotification('success', 'Succès', 'Tâche ajoutée avec succès');
     } catch (error) {
       console.error('Erreur lors de l\'ajout de la todo:', error);
       showNotification('error', 'Erreur', 'Impossible d\'ajouter la tâche');
@@ -371,29 +484,12 @@ export default function TodoPage() {
   };
 
   const toggleTodo = async (todoId: number, currentDone: boolean) => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/assignments/${todoId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          done: !currentDone,
-        }),
-      });
-
-      if (res.ok) {
-        setTodos(prev =>
-          prev.map(todo =>
-            todo.id === todoId ? { ...todo, done: !currentDone } : todo
-          )
-        );
-        showNotification('success', 'Succès', 'Tâche mise à jour');
-      }
+      await toggleAssignment(todoId, !currentDone);
+      setTodos(prev =>
+        prev.map(todo => (todo.id === todoId ? { ...todo, done: !currentDone } : todo))
+      );
+      showNotification('success', 'Succès', 'Tâche mise à jour');
     } catch (error) {
       console.error('Erreur lors de la mise à jour de la todo:', error);
       showNotification('error', 'Erreur', 'Impossible de mettre à jour la tâche');
@@ -457,7 +553,7 @@ export default function TodoPage() {
     return matchesSearch && matchesStatus && matchesPriority;
   });
 
-  if (loading) {
+  if (isLoading) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 dark:from-[#0f0d1a] dark:via-[#1a1628] dark:to-[#1a0f2a] flex items-center justify-center">
         <div className="text-xl text-gray-800 dark:text-white animate-pulse">Chargement des tâches...</div>
@@ -466,7 +562,8 @@ export default function TodoPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 dark:from-[#0f0d1a] dark:via-[#1a1628] dark:to-[#1a0f2a] text-gray-800 dark:text-white relative">
+    <AuthGuard requireAuth={true} requireApproved={true}>
+      <main className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 dark:from-[#0f0d1a] dark:via-[#1a1628] dark:to-[#1a0f2a] text-gray-800 dark:text-white relative">
       {/* Fond animé */}
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-32 h-32 bg-blue-400/10 rounded-full blur-xl animate-pulse" style={{ animationDelay: '0s', animationDuration: '4s' }}></div>
@@ -484,29 +581,106 @@ export default function TodoPage() {
 
       {/* Header */}
       <div className="relative z-10 p-6">
-        <div className="flex justify-between items-center mb-6">
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="flex items-center gap-2 text-gray-800 dark:text-white hover:text-blue-600 dark:hover:text-purple-400 transition"
-          >
-            <ArrowLeft className="w-5 h-5" />
-            Retour
-          </button>
-          
-                      <h1 className="text-3xl font-extrabold flex items-center gap-3 text-blue-600 dark:text-purple-400">
+        <div className="flex justify-between items-center mb-6 relative">
+          <div className="flex items-center gap-3">
+            <HamburgerMenu
+              items={[
+                { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard className="w-4 h-4" /> },
+                { label: "Gantt", href: "/gantt", icon: <BarChart3 className="w-4 h-4" /> },
+                { label: "Todo", href: "/todo", icon: <CheckSquare className="w-4 h-4" /> },
+                { label: "Machines", href: "/machines", icon: <Cpu className="w-4 h-4" /> },
+              ]}
+            />
+          </div>
+
+          <h1 className="text-3xl font-extrabold flex items-center gap-3 text-blue-600 dark:text-purple-400">
             <CheckSquare className="w-8 h-8" />
             Mes Tâches Assignées
           </h1>
-          
+
           <div className="flex items-center gap-3">
-            <ThemeToggle />
             <ProfileAvatar
               fullName={fullName}
-              size="md"
+              size="lg"
               onClick={() => setShowUserMenu(!showUserMenu)}
               showUploadButton={false}
             />
           </div>
+
+          {showUserMenu && (
+            <div
+              ref={userMenuRef}
+              className="absolute top-20 right-0 bg-white/40 dark:bg-gradient-to-br dark:from-gray-900/95 dark:to-gray-800/95 backdrop-blur-xl rounded-2xl shadow-2xl p-6 w-72 border border-gray-200/50 dark:border-white/10 z-[9999] animate-in slide-in-from-top-2 duration-300"
+            >
+              {/* Header avec avatar (identique Dashboard) */}
+              <div className="flex items-center gap-4 mb-6 pb-4 border-b border-gray-200 dark:border-white/10">
+                <ProfileAvatar
+                  fullName={fullName || username || 'Utilisateur'}
+                  size="md"
+                  showUploadButton={true}
+                />
+                <div className="flex-1">
+                  <div className="text-lg font-bold text-gray-800 dark:text-white">{fullName || 'Utilisateur'}</div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400 font-mono">@{username || 'user'}</div>
+                </div>
+              </div>
+
+              {/* Informations utilisateur */}
+              <div className="space-y-3 mb-6">
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-100/60 dark:bg-white/5 border border-gray-200/50 dark:border-white/10">
+                  <div className="w-8 h-8 rounded-full bg-blue-600/20 dark:bg-[#8c68d8]/20 flex items-center justify-center">
+                    <User className="w-4 h-4 text-blue-600 dark:text-[#8c68d8]" />
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">Rôle</div>
+                    <div className="text-gray-800 dark:text-white font-medium">{role === 'admin' ? 'Administrateur' : 'Utilisateur'}</div>
+                  </div>
+                </div>
+
+                {/* Section thème */}
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-100/60 dark:bg-white/5 border border-gray-200/50 dark:border-white/10">
+                  <div className="w-8 h-8 rounded-full bg-yellow-500/20 dark:bg-blue-500/20 flex items-center justify-center">
+                    {isDarkMode ? (
+                      <Moon className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+                    ) : (
+                      <Sun className="w-4 h-4 text-yellow-600" />
+                    )}
+                  </div>
+                  <div className="flex-1 text-left">
+                    <div className="text-sm text-gray-500 dark:text-gray-400">Thème</div>
+                    <div className="text-gray-800 dark:text-white font-medium">{isDarkMode ? 'Mode sombre' : 'Mode clair'}</div>
+                  </div>
+                  <button
+                    onClick={toggleTheme}
+                    className={`relative w-12 h-6 rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+                      isDarkMode ? 'bg-blue-500 focus:ring-blue-300' : 'bg-yellow-400 focus:ring-yellow-300'
+                    }`}
+                  >
+                    <div
+                      className={`absolute top-0.5 w-5 h-5 rounded-full shadow-md transform transition-all duration-300 flex items-center justify-center ${
+                        isDarkMode ? 'translate-x-6 bg-gray-800' : 'translate-x-0.5 bg-white'
+                      }`}
+                    >
+                      {isDarkMode ? (
+                        <Moon className="w-3 h-3 text-blue-400" />
+                      ) : (
+                        <Sun className="w-3 h-3 text-yellow-600" />
+                      )}
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Bouton déconnexion */}
+              <button
+                onClick={handleLogout}
+                className="w-full bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-xl px-4 py-3 font-semibold transition-all duration-300 cursor-pointer flex items-center justify-center gap-3 shadow-lg hover:shadow-red-500/25 hover:scale-105"
+              >
+                <LogOut className="w-4 h-4" />
+                Déconnexion
+              </button>
+            </div>
+          )}
         </div>
 
 
@@ -946,5 +1120,6 @@ export default function TodoPage() {
         onClose={hideNotification}
       />
     </main>
+    </AuthGuard>
   );
 } 

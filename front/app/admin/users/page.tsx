@@ -4,9 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/app/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { Loader2, Check, X, Clock, Users, RefreshCw, Mail, ArrowLeft, Settings } from 'lucide-react';
-import ProfileAvatar from '../components/ProfileAvatar';
-import Notification, { useNotification } from '../components/Notification';
+import { Loader2, Check, X, Clock, Users, RefreshCw, Mail, User } from 'lucide-react';
 
 interface PendingUser {
   id: string;
@@ -18,10 +16,9 @@ interface PendingUser {
   created_at: string;
 }
 
-export default function RolesPage() {
-  const { isAdmin, loading: authLoading, user } = useAuth();
+export default function AdminUsersPage() {
+  const { isAdmin, loading: authLoading } = useAuth();
   const router = useRouter();
-  const { notification, showNotification, hideNotification } = useNotification();
   const [users, setUsers] = useState<PendingUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [processingUserId, setProcessingUserId] = useState<string | null>(null);
@@ -29,7 +26,6 @@ export default function RolesPage() {
 
   useEffect(() => {
     if (!authLoading && !isAdmin) {
-      showNotification('error', 'Accès refusé', 'Vous devez être administrateur pour accéder à cette page.');
       router.push('/dashboard');
     }
   }, [isAdmin, authLoading, router]);
@@ -39,7 +35,7 @@ export default function RolesPage() {
     try {
       let query = supabase
         .from('profiles')
-        .select('id,email,first_name,last_name,role,status,created_at,avatar_url')
+        .select('*')
         .order('created_at', { ascending: false });
 
       if (filter !== 'all') {
@@ -52,7 +48,7 @@ export default function RolesPage() {
       setUsers(data || []);
     } catch (error) {
       console.error('Error fetching users:', error);
-      showNotification('error', 'Erreur', 'Erreur lors de la récupération des utilisateurs');
+      alert('Erreur lors de la récupération des utilisateurs');
     } finally {
       setLoading(false);
     }
@@ -71,11 +67,11 @@ export default function RolesPage() {
 
       if (error) throw error;
 
-      showNotification('success', 'Utilisateur approuvé', 'L\'utilisateur peut maintenant accéder au site.');
+      alert('Utilisateur approuvé avec succès !');
       fetchUsers();
     } catch (error: any) {
       console.error('Error approving user:', error);
-      showNotification('error', 'Erreur', `Erreur lors de l'approbation: ${error.message}`);
+      alert(`Erreur lors de l'approbation: ${error.message}`);
     } finally {
       setProcessingUserId(null);
     }
@@ -92,37 +88,11 @@ export default function RolesPage() {
 
       if (error) throw error;
 
-      showNotification('success', 'Utilisateur rejeté', 'L\'utilisateur a été rejeté.');
+      alert('Utilisateur rejeté');
       fetchUsers();
     } catch (error: any) {
       console.error('Error rejecting user:', error);
-      showNotification('error', 'Erreur', `Erreur lors du rejet: ${error.message}`);
-    } finally {
-      setProcessingUserId(null);
-    }
-  };
-
-  const handleRoleChange = async (userId: string, newRole: string) => {
-    // Empêcher un admin de modifier son propre rôle
-    if (userId === user?.id) {
-      showNotification('error', 'Action interdite', 'Vous ne pouvez pas modifier votre propre rôle.');
-      return;
-    }
-
-    setProcessingUserId(userId);
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ role: newRole })
-        .eq('id', userId);
-
-      if (error) throw error;
-
-      showNotification('success', 'Rôle modifié', `Le rôle a été changé en "${newRole === 'admin' ? 'Administrateur' : 'Utilisateur'}".`);
-      fetchUsers();
-    } catch (error: any) {
-      console.error('Error updating role:', error);
-      showNotification('error', 'Erreur', `Erreur lors de la modification du rôle: ${error.message}`);
+      alert(`Erreur lors du rejet: ${error.message}`);
     } finally {
       setProcessingUserId(null);
     }
@@ -148,34 +118,21 @@ export default function RolesPage() {
 
   if (authLoading || !isAdmin) {
     return (
-      <main className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 dark:from-[#0f0d1a] dark:via-[#1a1628] dark:to-[#1a0f2a] flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-blue-600 dark:text-[#8c68d8]" />
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 dark:from-[#0f0d1a] dark:via-[#1a1628] dark:to-[#1a0f2a] p-8">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Bouton Retour */}
-        <div className="mb-6">
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="flex items-center gap-2 text-gray-800 dark:text-white hover:text-blue-600 dark:hover:text-purple-400 transition"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Retour au menu
-          </button>
-        </div>
-
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center shadow-lg">
-              <Settings className="w-5 h-5 text-white" />
-            </div>
+            <Users className="w-8 h-8 text-blue-600 dark:text-[#8c68d8]" />
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-              Gestion des Rôles et Utilisateurs
+              Gestion des utilisateurs
             </h1>
           </div>
           <p className="text-gray-600 dark:text-gray-400">
@@ -184,45 +141,45 @@ export default function RolesPage() {
         </div>
 
         {/* Filtres */}
-        <div className="bg-white/60 dark:bg-gray-800/60 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/50 dark:border-white/10 p-6 mb-6">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 mb-6">
           <div className="flex flex-wrap gap-3 items-center justify-between">
             <div className="flex gap-2">
               <button
                 onClick={() => setFilter('all')}
-                className={`px-4 py-2 rounded-xl font-medium transition-all duration-300 ${
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
                   filter === 'all'
-                    ? 'bg-gradient-to-r from-blue-600 to-blue-700 dark:from-[#8c68d8] dark:to-[#7f49e8] text-white shadow-lg'
-                    : 'bg-gray-100/60 dark:bg-gray-700/60 text-gray-700 dark:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-gray-600/60'
+                    ? 'bg-blue-600 dark:bg-[#8c68d8] text-white'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                 }`}
               >
                 Tous
               </button>
               <button
                 onClick={() => setFilter('pending')}
-                className={`px-4 py-2 rounded-xl font-medium transition-all duration-300 ${
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
                   filter === 'pending'
-                    ? 'bg-gradient-to-r from-blue-600 to-blue-700 dark:from-[#8c68d8] dark:to-[#7f49e8] text-white shadow-lg'
-                    : 'bg-gray-100/60 dark:bg-gray-700/60 text-gray-700 dark:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-gray-600/60'
+                    ? 'bg-blue-600 dark:bg-[#8c68d8] text-white'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                 }`}
               >
                 En attente
               </button>
               <button
                 onClick={() => setFilter('approved')}
-                className={`px-4 py-2 rounded-xl font-medium transition-all duration-300 ${
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
                   filter === 'approved'
-                    ? 'bg-gradient-to-r from-blue-600 to-blue-700 dark:from-[#8c68d8] dark:to-[#7f49e8] text-white shadow-lg'
-                    : 'bg-gray-100/60 dark:bg-gray-700/60 text-gray-700 dark:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-gray-600/60'
+                    ? 'bg-blue-600 dark:bg-[#8c68d8] text-white'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                 }`}
               >
                 Approuvés
               </button>
               <button
                 onClick={() => setFilter('rejected')}
-                className={`px-4 py-2 rounded-xl font-medium transition-all duration-300 ${
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
                   filter === 'rejected'
-                    ? 'bg-gradient-to-r from-blue-600 to-blue-700 dark:from-[#8c68d8] dark:to-[#7f49e8] text-white shadow-lg'
-                    : 'bg-gray-100/60 dark:bg-gray-700/60 text-gray-700 dark:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-gray-600/60'
+                    ? 'bg-blue-600 dark:bg-[#8c68d8] text-white'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                 }`}
               >
                 Rejetés
@@ -232,7 +189,7 @@ export default function RolesPage() {
             <button
               onClick={fetchUsers}
               disabled={loading}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-100/60 dark:bg-gray-700/60 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-200/60 dark:hover:bg-gray-600/60 transition-all backdrop-blur-sm"
+              className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               Actualiser
@@ -246,17 +203,17 @@ export default function RolesPage() {
             <Loader2 className="w-8 h-8 animate-spin text-blue-600 dark:text-[#8c68d8]" />
           </div>
         ) : users.length === 0 ? (
-          <div className="bg-white/60 dark:bg-gray-800/60 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/50 dark:border-white/10 p-12 text-center">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-12 text-center">
             <Clock className="w-16 h-16 text-gray-400 dark:text-gray-600 mx-auto mb-4" />
             <p className="text-gray-600 dark:text-gray-400 text-lg">
               Aucun utilisateur {filter !== 'all' && filter} trouvé
             </p>
           </div>
         ) : (
-          <div className="bg-white/60 dark:bg-gray-800/60 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/50 dark:border-white/10 overflow-hidden">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="bg-gray-100/60 dark:bg-gray-700/60">
+                <thead className="bg-gray-50 dark:bg-gray-700">
                   <tr>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                       Utilisateur
@@ -278,17 +235,14 @@ export default function RolesPage() {
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200/50 dark:divide-gray-700/50">
+                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                   {users.map((user) => (
-                    <tr key={user.id} className="hover:bg-gray-50/40 dark:hover:bg-gray-700/40 transition-colors">
+                    <tr key={user.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <ProfileAvatar
-                            fullName={`${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email}
-                            size="md"
-                            avatarUrl={user.avatar_url || undefined}
-                            showUploadButton={false}
-                          />
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-blue-700 dark:from-[#8c68d8] dark:to-[#7f49e8] flex items-center justify-center text-white font-bold">
+                            {user.first_name?.[0] || user.email[0].toUpperCase()}
+                          </div>
                           <div>
                             <div className="font-medium text-gray-900 dark:text-white">
                               {user.first_name} {user.last_name}
@@ -303,19 +257,9 @@ export default function RolesPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <select
-                          value={user.role}
-                          onChange={(e) => handleRoleChange(user.id, e.target.value)}
-                          disabled={processingUserId === user.id || user.status !== 'approved'}
-                          className={`text-sm px-3 py-1.5 rounded-lg border transition-all ${
-                            user.status !== 'approved' 
-                              ? 'bg-gray-100 dark:bg-gray-700/50 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-600 cursor-not-allowed'
-                              : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-purple-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-purple-500 cursor-pointer'
-                          }`}
-                        >
-                          <option value="user">Utilisateur</option>
-                          <option value="admin">Administrateur</option>
-                        </select>
+                        <span className="text-sm text-gray-900 dark:text-white capitalize">
+                          {user.role}
+                        </span>
                       </td>
                       <td className="px-6 py-4">
                         {getStatusBadge(user.status)}
@@ -333,7 +277,7 @@ export default function RolesPage() {
                             <button
                               onClick={() => handleApprove(user.id)}
                               disabled={processingUserId === user.id}
-                              className="flex items-center gap-1 px-3 py-2 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-lg hover:from-green-700 hover:to-green-800 transition-all shadow-lg hover:shadow-green-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="flex items-center gap-1 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
                             >
                               {processingUserId === user.id ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -345,7 +289,7 @@ export default function RolesPage() {
                             <button
                               onClick={() => handleReject(user.id)}
                               disabled={processingUserId === user.id}
-                              className="flex items-center gap-1 px-3 py-2 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg hover:from-red-700 hover:to-red-800 transition-all shadow-lg hover:shadow-red-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="flex items-center gap-1 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
                             >
                               {processingUserId === user.id ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -365,15 +309,6 @@ export default function RolesPage() {
           </div>
         )}
       </div>
-
-      {/* Notification */}
-      <Notification
-        type={notification.type}
-        title={notification.title}
-        message={notification.message}
-        isVisible={notification.isVisible}
-        onClose={hideNotification}
-      />
-    </main>
+    </div>
   );
 }

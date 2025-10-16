@@ -5,46 +5,60 @@ import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import Notification, { useNotification } from '../components/Notification';
 import ThemeToggle from '../components/ThemeToggle';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 
 export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
-    username: '',
+    email: '',
     password: '',
   });
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
   const { notification, showNotification, hideNotification } = useNotification();
+  const { signIn } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
+
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/token`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          username: formData.username,
-          password: formData.password,
-        }),
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        localStorage.setItem('token', data.access_token);
+      const { error } = await signIn(formData.email, formData.password);
+
+      if (!error) {
         showNotification('success', 'Connexion réussie !', 'Vous êtes maintenant connecté à votre compte ARP.');
-        setTimeout(() => {
-          router.push('/dashboard');
-        }, 2000);
+
+        // Attendre un peu pour que le profil soit chargé
+        setTimeout(async () => {
+          // Vérifier le statut du profil après connexion
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('status')
+              .eq('id', session.user.id)
+              .single();
+
+            // Rediriger selon le statut
+            if (profile?.status === 'pending') {
+              router.push('/pending-approval');
+            } else if (profile?.status === 'approved') {
+              router.push('/dashboard');
+            } else if (profile?.status === 'rejected') {
+              showNotification('error', 'Accès refusé', 'Votre demande d\'accès a été refusée. Contactez un administrateur.');
+              await supabase.auth.signOut();
+            } else {
+              router.push('/dashboard');
+            }
+          }
+        }, 1500);
       } else {
-        showNotification('error', 'Erreur de connexion', 'Nom d\'utilisateur ou mot de passe incorrect');
+        showNotification('error', 'Erreur de connexion', error.message || 'Email ou mot de passe incorrect');
       }
     } catch (error) {
       console.error('Error:', error);
-      showNotification('error', 'Erreur', 'Une erreur est survenue lors de la connexion au serveur');
+      showNotification('error', 'Erreur', 'Une erreur est survenue lors de la connexion');
     } finally {
       setIsLoading(false);
     }
@@ -98,16 +112,16 @@ export default function Login() {
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
-                <label htmlFor="username" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Nom d'utilisateur
+                <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Email
                 </label>
                 <input
-                  type="text"
-                  id="username"
-                  value={formData.username}
-                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                  type="email"
+                  id="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className="w-full px-4 py-3 bg-white/40 dark:bg-white/20 border border-white/50 dark:border-white/30 rounded-xl text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-purple-500 focus:border-transparent focus:bg-white/60 dark:focus:bg-white/30"
-                  placeholder="Entrez votre nom d'utilisateur"
+                  placeholder="Entrez votre email"
                   required
                 />
               </div>

@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Camera, X } from 'lucide-react';
+import { Camera, X, Loader2 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 interface ProfileAvatarProps {
   fullName: string;
@@ -9,17 +11,21 @@ interface ProfileAvatarProps {
   className?: string;
   onClick?: () => void;
   showUploadButton?: boolean;
+  avatarUrl?: string; // URL explicite d'un avatar (pour afficher d'autres profils)
 }
 
-export default function ProfileAvatar({ 
-  fullName, 
-  size = 'md', 
-  className = '', 
+export default function ProfileAvatar({
+  fullName,
+  size = 'md',
+  className = '',
   onClick,
-  showUploadButton = false 
+  showUploadButton = false,
+  avatarUrl
 }: ProfileAvatarProps) {
+  const { user, profile, refreshProfile } = useAuth();
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [showUploadMenu, setShowUploadMenu] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -31,34 +37,109 @@ export default function ProfileAvatar({
 
   const initials = (fullName || "U").split(" ").map(n => n[0]).join("").toUpperCase();
 
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const result = e.target?.result as string;
-        setProfileImage(result);
-        // Sauvegarder dans localStorage
-        localStorage.setItem('profileImage', result);
-      };
-      reader.readAsDataURL(file);
+    if (!file || !user) return;
+
+    setUploading(true);
+    setShowUploadMenu(false);
+
+    try {
+      // 1. Supprimer l'ancien avatar s'il existe
+      if (profile?.avatar_url) {
+        const oldPath = profile.avatar_url.split('/avatars/')[1];
+        if (oldPath) {
+          await supabase.storage.from('avatars').remove([oldPath]);
+        }
+      }
+
+      // 2. Générer le nom du fichier
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${user.id}/avatar.${fileExt}`;
+
+      // 3. Uploader le fichier sur Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(fileName, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      // 4. Obtenir l'URL publique
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(fileName);
+
+      // 5. Mettre à jour le profil dans la base de données
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      // 6. Rafraîchir le profil dans le context
+      await refreshProfile();
+      setProfileImage(publicUrl);
+
+    } catch (error) {
+      console.error('Error uploading avatar:', error);
+      alert('Erreur lors de l\'upload de l\'avatar. Veuillez réessayer.');
+    } finally {
+      setUploading(false);
     }
-    setShowUploadMenu(false);
   };
 
-  const removeProfileImage = () => {
-    setProfileImage(null);
-    localStorage.removeItem('profileImage');
+  const removeProfileImage = async () => {
+    if (!user || !profile?.avatar_url) return;
+
+    setUploading(true);
     setShowUploadMenu(false);
+
+    try {
+      // 1. Extraire le chemin du fichier depuis l'URL
+      const filePath = profile.avatar_url.split('/avatars/')[1];
+
+      if (filePath) {
+        // 2. Supprimer le fichier du storage
+        const { error: deleteError } = await supabase.storage
+          .from('avatars')
+          .remove([filePath]);
+
+        if (deleteError) throw deleteError;
+      }
+
+      // 3. Mettre à jour le profil (supprimer l'URL)
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: null })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      // 4. Rafraîchir le profil
+      await refreshProfile();
+      setProfileImage(null);
+
+    } catch (error) {
+      console.error('Error removing avatar:', error);
+      alert('Erreur lors de la suppression de l\'avatar. Veuillez réessayer.');
+    } finally {
+      setUploading(false);
+    }
   };
 
-  // Charger l'image depuis localStorage au montage
+  // Charger l'avatar: priorité à avatarUrl passé en prop (pour d'autres utilisateurs), sinon profil courant
   useEffect(() => {
-    const savedImage = localStorage.getItem('profileImage');
-    if (savedImage) {
-      setProfileImage(savedImage);
+    if (avatarUrl) {
+      setProfileImage(avatarUrl);
+      return;
     }
-  }, []);
+    if (profile?.avatar_url) {
+      setProfileImage(profile.avatar_url);
+    } else {
+      setProfileImage(null);
+    }
+  }, [profile, avatarUrl]);
 
   // Fermer le menu si on clique en dehors
   useEffect(() => {
@@ -83,11 +164,14 @@ export default function ProfileAvatar({
       >
         {/* Effet de brillance */}
         <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-        
-        {profileImage ? (
+
+        {uploading ? (
+          // Loader pendant l'upload
+          <Loader2 className="w-6 h-6 text-white animate-spin" />
+        ) : profileImage ? (
           // Photo de profil
-          <img 
-            src={profileImage} 
+          <img
+            src={profileImage}
             alt={fullName}
             className="w-full h-full object-cover rounded-full"
           />
@@ -100,7 +184,7 @@ export default function ProfileAvatar({
       </div>
 
       {/* Bouton d'upload si activé */}
-      {showUploadButton && (
+      {showUploadButton && !uploading && (
         <button
           onClick={() => setShowUploadMenu(!showUploadMenu)}
           className="absolute -bottom-1 -right-1 w-6 h-6 bg-blue-600 dark:bg-[#8c68d8] rounded-full flex items-center justify-center text-white text-xs hover:scale-110 transition-transform shadow-lg"

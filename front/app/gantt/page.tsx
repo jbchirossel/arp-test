@@ -8,6 +8,10 @@ import { ArrowLeft, Plus, X, Send, Users, Calendar, Settings, Trash2, CheckSquar
 import Notification, { useNotification } from '../components/Notification';
 import ThemeToggle from '../components/ThemeToggle';
 import ProfileAvatar from '../components/ProfileAvatar';
+import AuthGuard from '../components/AuthGuard';
+import { useAuth } from '../contexts/AuthContext';
+import { getGanttData, getEnsembles, createMachine, createEnsemble, createTask, updateMachine, updateEnsemble, updateTask, deleteMachine, deleteEnsemble, deleteTask } from '@/lib/supabase-gantt';
+import { supabase } from '@/lib/supabase';
 
 // ---- CONSTANTES LOCALES ----
 
@@ -226,6 +230,7 @@ export default function GanttBoard() {
   const [fullName, setFullName] = useState<string>("");
   const [username, setUsername] = useState<string>("");
   const [role, setRole] = useState<string | null>(null);
+  const { user, profile, role: userRole, signOut } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showCommentModal, setShowCommentModal] = useState(false);
@@ -306,25 +311,13 @@ export default function GanttBoard() {
     document.documentElement.classList.toggle('dark', shouldBeDark);
   }, []);
 
-  // Charger les infos utilisateur
+  // Charger les infos utilisateur depuis le contexte Supabase (comme Dashboard)
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-    
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    .then(async res => {
-      if (!res.ok) throw new Error();
-      const user = await res.json();
-      setRole(user.is_superuser ? "admin" : "user");
-      setFullName(`${user.first_name} ${user.last_name}`.trim());
-      setUsername(user.username);
-    })
-    .catch(() => {
-      // Erreur silencieuse
-    });
-  }, []);
+    const computedFullName = profile ? `${profile.first_name} ${profile.last_name}`.trim() : (user?.email?.split('@')[0] || "");
+    setFullName(computedFullName);
+    setUsername(user?.email?.split('@')[0] || "");
+    setRole(userRole || null);
+  }, [user, profile, userRole]);
 
   // Fermer le menu utilisateur si on clique en dehors
   useEffect(() => {
@@ -340,54 +333,15 @@ export default function GanttBoard() {
     }
   }, [showUserMenu]);
 
-  // === FONCTIONS ASYNC/FETCH ===
+  // === FONCTIONS ASYNC/FETCH (SUPABASE) ===
   async function ajouterMachine(nom: string) {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/machines`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({ name: nom, year: year }),
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({}));
-      throw new Error(error.detail || 'Erreur ajout machine');
-    }
-    return await res.json();
+    const machine = await createMachine(nom, year);
+    return machine;
   }
 
   async function ajouterEnsemble(nom: string, machineId: number) {
-    const token = localStorage.getItem('token');
-    // console.log('Envoi de la requête d\'ajout d\'ensemble:', { nom, machineId });
-    
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/ensembles`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({ name: nom, machine_id: machineId, year: year }),
-    });
-    
-    // console.log('Réponse du serveur:', res.status, res.statusText);
-    
-    if (!res.ok) {
-      let errorMsg = 'Erreur ajout ensemble';
-      try {
-        const error = await res.json();
-        errorMsg = error.detail || errorMsg;
-        // console.error('Erreur détaillée:', error);
-      } catch (e) {
-        // console.error('Erreur lors du parsing de la réponse:', e);
-      }
-      throw new Error(errorMsg);
-    }
-    
-    const result = await res.json();
-    // console.log('Ensemble créé avec succès:', result);
-    return result;
+    const ensemble = await createEnsemble(nom, machineId, year);
+    return ensemble;
   }
 
   async function ajouterTask(
@@ -397,72 +351,61 @@ export default function GanttBoard() {
     ensembleId: number,
     comments = ""
   ) {
-    const token = localStorage.getItem('token');
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/tasks`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        type,
-        start_week: startWeek,
-        end_week: endWeek,
-        year: year,
-        ensemble_id: ensembleId,
-        comments
-      }),
+    const task = await createTask({
+      type,
+      start_week: startWeek,
+      end_week: endWeek,
+      year,
+      ensemble_id: ensembleId,
+      comments
     });
-
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({}));
-      let message = 'Erreur ajout task';
-      if (Array.isArray(error.detail)) {
-        message = error.detail.map((e: any) => e.msg).join(' / ');
-      } else if (typeof error.detail === 'string') {
-        message = error.detail;
-      }
-      throw new Error(message);
-    }
-    return await res.json();
+    return task;
   }
 
   // === USE EFFECTS ===
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/data?year=${year}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (!data) return;
-        setMachinesList(data.machines);
-        setMachines(data.machines.map((m: any) => m.name));
+    (async () => {
+      try {
+        const data: any = await getGanttData(year);
+        setMachinesList(data.machines || []);
+        setMachines((data.machines || []).map((m: any) => m.name));
         const ensemblesByMachine: Record<string, string[]> = {};
-        data.machines.forEach((m: any) => {
-          ensemblesByMachine[m.name] = data.ensembles
+        (data.machines || []).forEach((m: any) => {
+          ensemblesByMachine[m.name] = (data.ensembles || [])
             .filter((e: any) => e.machine_id === m.id)
             .map((e: any) => e.name);
         });
         setEnsembles(ensemblesByMachine);
+        setEnsemblesList(data.ensembles || []);
         setTasks(
           (data.tasks || []).map((t: any) => {
-            // Trouver l'ensemble correspondant
-            const ensemble = data.ensembles.find((e: any) => e.id === t.ensemble_id);
-            // Trouver la machine correspondante
-            const machine = data.machines.find((m: any) => m.id === ensemble?.machine_id);
-            
+            const ensemble = (data.ensembles || []).find((e: any) => e.id === t.ensemble_id);
+            const machine = (data.machines || []).find((m: any) => m.id === ensemble?.machine_id);
             return {
-              ...t,
+              id: t.id,
+              type: t.type as PhaseType,
               startWeek: t.start_week,
               endWeek: t.end_week,
               machine: machine?.name || '',
               ensemble: ensemble?.name || '',
+              comment: t.comments,
             };
           })
         );
-      });
+        // Commentaires
+        const newComments: Record<string, string> = {};
+        (data.ensembles || []).forEach((e: any) => {
+          if (e.comments) {
+            const mname = (data.machines || []).find((m: any) => m.id === e.machine_id)?.name;
+            if (mname) newComments[`${mname}__${e.name}`] = e.comments;
+          }
+        });
+        setComments(newComments);
+        setReady(true);
+      } catch (e) {
+        console.error(e);
+      }
+    })();
   }, [year]);
 
   // Charger les ensembles pour la machine sélectionnée (pour ajouter un ensemble)
@@ -476,15 +419,7 @@ export default function GanttBoard() {
       setEnsemblesPourMachine([]);
       return;
     }
-    const token = localStorage.getItem('token');
-    if (!token) {
-      setEnsemblesPourMachine([]);
-      return;
-    }
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/ensembles/${machineObj.id}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(res => res.ok ? res.json() : [])
+    getEnsembles(machineObj.id)
       .then(data => setEnsemblesPourMachine(Array.isArray(data) ? data : []))
       .catch(() => setEnsemblesPourMachine([]));
   }, [selectedMachine, machinesList]);
@@ -498,106 +433,90 @@ export default function GanttBoard() {
     if (!machineObj) {
       return;
     }
-    const token = localStorage.getItem('token');
-    if (!token) {
-      return;
-    }
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/ensembles/${machineObj.id}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(res => res.ok ? res.json() : [])
+    getEnsembles(machineObj.id)
       .then(data => setEnsemblesPourMachine(Array.isArray(data) ? data : []))
       .catch(() => setEnsemblesPourMachine([]));
   }, [taskForm.machine, machinesList]);
 
-  useEffect(() => {
-    if (machinesList.length === 0) return;
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
-    Promise.all(
-      machinesList.map((machine: any) =>
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/ensembles/${machine.id}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-          .then(res => res.ok ? res.json() : [])
-          .then((data: any[]) => ({ machine: machine.name, ensembles: data }))
-      )
-    ).then(results => {
-      const newEnsembles: Record<string, string[]> = {};
-      const newComments: Record<string, string> = {};
-      results.forEach(({ machine, ensembles }) => {
-        newEnsembles[machine] = ensembles.map((e: any) => e.name);
-        ensembles.forEach((e: any) => {
-          if (e.comments) {
-            const key = `${machine}__${e.name}`;
-            newComments[key] = e.comments;
-          }
-        });
-      });
-      setEnsembles(newEnsembles);
-      setComments(prev => ({ ...newComments, ...prev }));
-    });
-  }, [machinesList]);
+  // Ce useEffect est désormais géré dans le premier useEffect qui charge les données
+  // avec getGanttData qui retourne déjà tout (machines, ensembles, tasks, comments)
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-    
-    // Test avec des données statiques pour vérifier si le problème vient de l'API
-    const testUsers: BackendUser[] = [
-      { id: 1, username: 'admin', email: 'admin@example.com', first_name: 'Admin', last_name: 'User', is_superuser: true },
-      { id: 2, username: 'john', email: 'john@example.com', first_name: 'John', last_name: 'Doe', is_superuser: false },
-      { id: 3, username: 'jane', email: 'jane@example.com', first_name: 'Jane', last_name: 'Smith', is_superuser: false },
-    ];
-    
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/auth/users/contacts`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(res => {
-        return res.ok ? res.json() : [];
-      })
-      .then(data => {
-        // Utiliser les données de l'API si disponibles, sinon les données de test
-        setAllUsers(data && data.length > 0 ? data : testUsers);
-      })
-      .catch((error) => {
-        setAllUsers(testUsers);
-      });
+    // Charger les utilisateurs depuis Supabase
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, email, first_name, last_name, role, status')
+          .eq('status', 'approved');
+        if (error) throw error;
+        const mapped: BackendUser[] = (data || []).map((p: any) => ({
+          id: p.id,
+          username: p.email?.split('@')[0] || p.first_name || 'user',
+          email: p.email,
+          first_name: p.first_name || '',
+          last_name: p.last_name || '',
+          is_superuser: p.role === 'admin',
+        }));
+        setAllUsers(mapped);
+      } catch (e) {
+        setAllUsers([]);
+      }
+    })();
   }, []);
+
+  // Les contacts sont déjà dans la table contacts de Supabase
 
   useEffect(() => {
     if (!selectedTask) {
       setTaskTodos([]);
       return;
     }
-    const token = localStorage.getItem('token');
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/task/${selectedTask.id}/checklist`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-      .then(res => res.ok ? res.json() : [])
-      .then(data => {
-        setTaskTodos(data.map((t: any) => ({
+    // Charger checklist depuis Supabase
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('task_checklist_items')
+          .select('*')
+          .eq('task_id', selectedTask.id)
+          .order('created_at');
+        if (error) throw error;
+        setTaskTodos((data || []).map((t: any) => ({
           id: t.id,
           text: t.text,
           done: t.done
         })));
-      })
-      .catch(() => setTaskTodos([]));
+      } catch (e) {
+        setTaskTodos([]);
+      }
+    })();
   }, [selectedTask]);
 
-  // Charger les contacts depuis le localStorage au démarrage
+  // Charger les contacts depuis Supabase au démarrage
   useEffect(() => {
-    const savedContacts = localStorage.getItem('gantt-contacts');
-    if (savedContacts) {
+    (async () => {
       try {
-        const parsedContacts = JSON.parse(savedContacts);
-        setContacts(parsedContacts);
+        const { data, error } = await supabase
+          .from('contacts')
+          .select('*')
+          .order('last_name');
+
+        if (error) throw error;
+
+        const mappedContacts: Contact[] = (data || []).map((c: any) => ({
+          id: c.id,
+          firstName: c.first_name,
+          lastName: c.last_name,
+          email: c.email,
+          category: c.category,
+        }));
+
+        setContacts(mappedContacts);
       } catch (error) {
-        // console.error('Erreur lors du chargement des contacts:', error);
+        console.error('Erreur lors du chargement des contacts:', error);
         setContacts([]);
       }
-    }
+    })();
   }, []);
 
   // Écouter les changements de taille de fenêtre
@@ -740,12 +659,14 @@ export default function GanttBoard() {
     if (!ensembleObj) return;
     try {
       const newTask = await ajouterTask(type, startWeek, endWeek, ensembleObj.id, comment);
-      const mappedTask = {
-        ...newTask,
+      const mappedTask: Task = {
+        id: newTask.id,
+        type: newTask.type as PhaseType,
         startWeek: newTask.start_week,
         endWeek: newTask.end_week,
         machine: machine,
         ensemble: ensemble,
+        comment: newTask.comments,
       };
       setTasks(prev => [...prev, mappedTask]);
       setTaskForm(f => ({ ...f, comment: '', startWeek: 1, endWeek: 1 }));
@@ -756,82 +677,52 @@ export default function GanttBoard() {
   }
 
   const handleDeleteTask = useCallback(async (id: string | number) => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/tasks/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (res.ok) {
-        setTasks(prev => prev.filter(t => t.id !== id));
-        setBarHovered(null); 
-        setShowDeleteBar(null);
-        setSelectedTask(cur => (cur && cur.id === id ? null : cur));
-        setTaskTodos([]);
-        showNotification('success', 'Succès', 'Tâche supprimée avec succès');
-      } else {
-        showNotification('error', 'Erreur', 'Erreur lors de la suppression de la tâche');
-      }
+      await deleteTask(Number(id));
+      setTasks(prev => prev.filter(t => t.id !== id));
+      setBarHovered(null);
+      setShowDeleteBar(null);
+      setSelectedTask(cur => (cur && cur.id === id ? null : cur));
+      setTaskTodos([]);
+      showNotification('success', 'Succès', 'Tâche supprimée avec succès');
     } catch (error) {
+      console.error('Error deleting task:', error);
       showNotification('error', 'Erreur', 'Erreur lors de la suppression de la tâche');
     }
   }, [showNotification]);
 
   const handleDeleteEnsemble = useCallback(async (machine: string, ensemble: string) => {
-    let ensembleId: number | undefined = undefined;
-    if (selectedMachine === machine && ensemblesPourMachine.length > 0) {
-      const found = ensemblesPourMachine.find(e => e.name === ensemble);
-      if (found) ensembleId = found.id;
-    }
-    if (ensembleId === undefined && machinesList.length > 0) {
-      const machineObj = machinesList.find(m => m.name === machine);
-      if (machineObj) {
-        const token = localStorage.getItem('token');
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/ensembles/${machineObj.id}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const found = data.find((e: any) => e.name === ensemble);
-          if (found) ensembleId = found.id;
-        }
+    try {
+      // Trouver l'ID de l'ensemble
+      let ensembleId: number | undefined = undefined;
+      const found = ensemblesList.find(e => e.name === ensemble);
+      if (found) {
+        ensembleId = found.id;
       }
+
+      if (!ensembleId) {
+        showNotification('error', 'Erreur', 'Impossible de trouver l\'ensemble à supprimer');
+        return;
+      }
+
+      await deleteEnsemble(ensembleId);
+
+      setEnsembles(prev => {
+        const update = { ...prev };
+        update[machine] = update[machine].filter(e => e !== ensemble);
+        return update;
+      });
+      setTasks(prev => prev.filter(t => !(t.machine === machine && t.ensemble === ensemble)));
+      setComments(prev => { const copy = { ...prev }; delete copy[`${machine}__${ensemble}`]; return copy; });
+      setTaskTodos([]);
+      showNotification('success', 'Succès', 'Ensemble supprimé avec succès');
+    } catch (error) {
+      console.error('Error deleting ensemble:', error);
+      showNotification('error', 'Erreur', 'Erreur lors de la suppression de l\'ensemble');
     }
-    if (!ensembleId) {
-      showNotification('error', 'Erreur', 'Impossible de trouver l\'ensemble à supprimer');
-      return;
-    }
-    const token = localStorage.getItem('token');
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/ensembles/${ensembleId}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
-    if (!res.ok) {
-      showNotification('error', 'Erreur', 'Erreur lors de la suppression côté serveur');
-      return;
-    }
-    setEnsembles(prev => {
-      const update = { ...prev };
-      update[machine] = update[machine].filter(e => e !== ensemble);
-      return update;
-    });
-    setTasks(prev => prev.filter(t => !(t.machine === machine && t.ensemble === ensemble)));
-    setComments(prev => { const copy = { ...prev }; delete copy[`${machine}__${ensemble}`]; return copy; });
-    setTaskTodos([]);
-    showNotification('success', 'Succès', 'Ensemble supprimé avec succès');
-  }, [selectedMachine, ensemblesPourMachine, machinesList, showNotification]);
+  }, [ensemblesList, showNotification]);
 
   const handleDeleteMachine = useCallback(async (machine: string) => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
     // Trouver l'ID de la machine
     const machineObj = machinesList.find(m => m.name === machine);
     if (!machineObj) {
@@ -840,28 +731,20 @@ export default function GanttBoard() {
     }
 
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/machines/${machineObj.id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      await deleteMachine(machineObj.id);
 
-      if (res.ok) {
-        setMachines(prev => prev.filter(m => m !== machine));
-        setEnsembles(prev => { const update = { ...prev }; delete update[machine]; return update; });
-        setTasks(prev => prev.filter(t => t.machine !== machine));
-        setComments(prev => {
-          const update = { ...prev };
-          Object.keys(update).forEach(key => { if (key.startsWith(machine + '__')) delete update[key]; });
-          return update;
-        });
-        setTaskTodos([]);
-        showNotification('success', 'Succès', 'Machine supprimée avec succès');
-      } else {
-        showNotification('error', 'Erreur', 'Erreur lors de la suppression de la machine');
-      }
+      setMachines(prev => prev.filter(m => m !== machine));
+      setEnsembles(prev => { const update = { ...prev }; delete update[machine]; return update; });
+      setTasks(prev => prev.filter(t => t.machine !== machine));
+      setComments(prev => {
+        const update = { ...prev };
+        Object.keys(update).forEach(key => { if (key.startsWith(machine + '__')) delete update[key]; });
+        return update;
+      });
+      setTaskTodos([]);
+      showNotification('success', 'Succès', 'Machine supprimée avec succès');
     } catch (error) {
+      console.error('Error deleting machine:', error);
       showNotification('error', 'Erreur', 'Erreur lors de la suppression de la machine');
     }
   }, [machinesList, showNotification]);
@@ -873,33 +756,16 @@ export default function GanttBoard() {
     notify: boolean = false
   ) {
     try {
-      const token = localStorage.getItem('token');
-      if (!token) return;
-      const machineObj = machinesList.find((m: any) => m.name === machine);
-      if (!machineObj) return;
-      const resEns = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/ensembles/${machineObj.id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!resEns.ok) return;
-      const listEns = await resEns.json();
-      const found = Array.isArray(listEns) ? listEns.find((e: any) => e.name === ensemble) : null;
+      const found = ensemblesList.find((e: any) => e.name === ensemble);
       if (!found) return;
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/ensembles/${found.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ comments: value }),
-      });
+
+      await updateEnsemble(found.id, { comments: value });
+
       if (notify) {
-        if (res.ok) {
-          showNotification('success', 'Succès', 'Commentaire bien ajouté');
-        } else {
-          showNotification('error', 'Erreur', "Échec de l'ajout du commentaire");
-        }
+        showNotification('success', 'Succès', 'Commentaire bien ajouté');
       }
     } catch (e) {
+      console.error('Error saving comment:', e);
       if (notify) {
         showNotification('error', 'Erreur', "Échec de l'ajout du commentaire");
       }
@@ -910,39 +776,63 @@ export default function GanttBoard() {
     e.preventDefault();
     const input = contactForm.email.trim().toLowerCase();
     if (!input) return;
-    
+
     if (!contactForm.firstName.trim() || !contactForm.lastName.trim()) {
       showNotification('error', 'Erreur', 'Veuillez remplir le prénom et le nom du contact');
       return;
     }
-    
-    // Ajout local avec sauvegarde dans localStorage
-    const newContact: Contact = {
-      id: Date.now(), // ID temporaire basé sur le timestamp
-      firstName: contactForm.firstName,
-      lastName: contactForm.lastName,
-      email: contactForm.email,
-      category: contactForm.category,
-    };
-    
-    const updatedContacts = [...contacts, newContact];
-    setContacts(updatedContacts);
-    
-    // Sauvegarder dans le localStorage
-    localStorage.setItem('gantt-contacts', JSON.stringify(updatedContacts));
-    
-    setContactForm({ firstName: '', lastName: '', email: '', category: PHASE_LIST[0] });
-    setShowSuggestions(false);
-    showNotification('success', 'Contact assigné', `${contactForm.firstName} ${contactForm.lastName} a été assigné à la phase ${contactForm.category}`);
+
+    try {
+      // Ajouter dans Supabase
+      const { data, error } = await supabase
+        .from('contacts')
+        .insert({
+          first_name: contactForm.firstName,
+          last_name: contactForm.lastName,
+          email: contactForm.email,
+          category: contactForm.category,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Ajouter au state local
+      const newContact: Contact = {
+        id: data.id,
+        firstName: data.first_name,
+        lastName: data.last_name,
+        email: data.email,
+        category: data.category,
+      };
+
+      setContacts(prev => [...prev, newContact]);
+      setContactForm({ firstName: '', lastName: '', email: '', category: PHASE_LIST[0] });
+      setShowSuggestions(false);
+      showNotification('success', 'Succès', `${contactForm.firstName} ${contactForm.lastName} a été ajouté à la phase ${contactForm.category}`);
+    } catch (error) {
+      console.error('Error adding contact:', error);
+      showNotification('error', 'Erreur', 'Erreur lors de l\'ajout du contact');
+    }
   }
 
   async function handleDeleteContact(id: string | number) {
-    // Suppression locale avec mise à jour du localStorage
-    const updatedContacts = contacts.filter(c => c.id !== id);
-    setContacts(updatedContacts);
-    
-    // Sauvegarder dans le localStorage
-    localStorage.setItem('gantt-contacts', JSON.stringify(updatedContacts));
+    try {
+      // Supprimer de Supabase
+      const { error } = await supabase
+        .from('contacts')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      // Mettre à jour le state local
+      setContacts(prev => prev.filter(c => c.id !== id));
+      showNotification('success', 'Succès', 'Contact supprimé');
+    } catch (error) {
+      console.error('Error deleting contact:', error);
+      showNotification('error', 'Erreur', 'Erreur lors de la suppression du contact');
+    }
   }
 
   function openSendModal() {
@@ -1178,18 +1068,22 @@ export default function GanttBoard() {
 
   async function handleSendTodo() {
     if (!selectedTask) return;
-    const token = localStorage.getItem("token");
+
     const todoItems = taskTodos;
     const todoText = todoItems.length
       ? todoItems.map(t => (t.done ? "✔️" : "⬜️") + " " + t.text).join("\n")
       : "Aucune tâche définie.";
     const allSelected = sendSelected.map(e => e.toLowerCase().trim());
-    
+
     // Séparer les emails selon s'ils appartiennent à des utilisateurs de la plateforme ou non
     const platformUserEmails = allUsers.map(u => u.email.toLowerCase().trim());
     const userEmails = allSelected.filter(e => platformUserEmails.includes(e));
     const manualEmails = allSelected.filter(e => !platformUserEmails.includes(e));
-    
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    // Assigner aux utilisateurs de la plateforme
     for (const identifier of userEmails) {
       const user = allUsers.find(u =>
         u.email.toLowerCase() === identifier ||
@@ -1197,46 +1091,45 @@ export default function GanttBoard() {
       );
       if (user) {
         try {
-          const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/assign-todo`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${token}`,
-            },
-            body: JSON.stringify({
+          // Insérer dans user_assignments (table Supabase)
+          const { error } = await supabase
+            .from('user_assignments')
+            .insert({
               user_id: user.id,
+              task_id: Number(selectedTask.id),
               title: `Tâche ${selectedTask.type} - ${selectedTask.ensemble}`,
-              body: todoText,
-              task_id: selectedTask.id.toString(),
-            }),
-          });
-          
-          if (!res.ok) {
-            // console.error("Erreur lors de la création de la todo:", await res.text());
+              description: todoText,
+              done: false,
+            });
+
+          if (error) {
+            console.error("Erreur lors de la création de l'assignment:", error);
+            errorCount++;
           } else {
-            // console.log("Todo créée avec succès pour", user.username);
+            successCount++;
           }
         } catch (error) {
-          // console.error("Erreur lors de la création de la todo:", error);
+          console.error("Erreur lors de la création de l'assignment:", error);
+          errorCount++;
         }
       }
     }
-    
+
+    // Pour les emails manuels (non-utilisateurs de la plateforme)
     if (manualEmails.length > 0) {
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/send-mail`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          to: manualEmails,
-          subject: `To-do ${selectedTask.ensemble}`,
-          body: `Tâche : ${selectedTask.ensemble}\n\n${todoText}`,
-        }),
-      });
+      // Note: Pour envoyer des emails, tu devras configurer un service d'emails
+      // (ex: Supabase Edge Functions avec Resend, SendGrid, etc.)
+      console.log('Emails manuels à envoyer:', manualEmails);
+      showNotification('info', 'Information', `${manualEmails.length} email(s) externe(s) - fonctionnalité d'envoi email à configurer`);
     }
-    showNotification('success', 'Succès', 'To-do envoyée !');
+
+    if (successCount > 0) {
+      showNotification('success', 'Succès', `${successCount} assignation(s) créée(s) !`);
+    }
+    if (errorCount > 0) {
+      showNotification('error', 'Erreur', `${errorCount} erreur(s) lors de l'assignation`);
+    }
+
     setShowSendModal(false);
   }
 
@@ -1278,10 +1171,7 @@ export default function GanttBoard() {
             { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard className="w-4 h-4" /> },
             { label: "Gantt", href: "/gantt", icon: <Calendar className="w-4 h-4" /> },
             { label: "To-Do", href: "/todo", icon: <CheckSquare className="w-4 h-4" /> },
-            { label: "Analyse Financière", href: "/analyse-financiere", icon: <BarChart3 className="w-4 h-4" /> },
-            { label: "Suivi Sous-Traitance", href: "/sous-traitance", icon: <Package className="w-4 h-4" /> },
-            { label: "Analyse Machines", href: "/machines", icon: <Cpu className="w-4 h-4" /> },
-            { label: "Intégration Solune", href: "/integration-solune", icon: <FileSpreadsheet className="w-4 h-4" /> },
+            { label: "Machines", href: "/machines", icon: <Cpu className="w-4 h-4" /> },
           ]}
         />
 

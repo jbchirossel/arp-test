@@ -1,48 +1,39 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '../contexts/AuthContext';
 
+/**
+ * Hook pour protéger les pages admin
+ * Redirige vers /login si non connecté
+ * Redirige vers /dashboard si pas admin
+ */
 export function useAdminAuth() {
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const { user, profile, loading, isAdmin } = useAuth();
 
   useEffect(() => {
-    const checkAdminStatus = async () => {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        router.push('/login');
-        return;
-      }
+    if (loading) return;
 
-      try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/me`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        
-        if (!response.ok) {
-          router.push('/login');
-          return;
-        }
+    // Si pas connecté, rediriger vers login
+    if (!user || !profile) {
+      router.push('/login');
+      return;
+    }
 
-        const user = await response.json();
-        if (!user.is_superuser) {
-          router.push('/dashboard');
-          return;
-        }
+    // Si connecté mais pas admin, rediriger vers dashboard
+    if (!isAdmin) {
+      router.push('/dashboard');
+      return;
+    }
+  }, [user, profile, loading, isAdmin, router]);
 
-        setIsAdmin(true);
-      } catch (error) {
-        router.push('/login');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    checkAdminStatus();
-  }, [router]);
-
-  return { isAdmin, loading };
+  return {
+    isAdmin,
+    loading,
+    profile,
+    user,
+  };
 }
 

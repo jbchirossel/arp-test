@@ -2,6 +2,11 @@
 
 import React, { useState } from 'react';
 import { Plus, Trash2, CheckSquare, Square } from 'lucide-react';
+import {
+  createChecklistItem,
+  updateChecklistItem,
+  deleteChecklistItem,
+} from '@/lib/supabase-gantt';
 
 type TodoType = {
   id: number;
@@ -22,76 +27,30 @@ export default function TodoList({ taskId, todos, setTodos }: TodoListProps) {
     const text = newTodo.trim();
     if (!text) return;
 
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/checklist`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          text,
-          done: false,
-          task_id: taskId,
-        }),
-      });
-
-      if (res.ok) {
-        const newTodoItem = await res.json();
-        setTodos(prev => [...prev, newTodoItem]);
-        setNewTodo('');
-      }
+      const newTodoItem = await createChecklistItem(text, taskId);
+      setTodos(prev => [...prev, { id: newTodoItem.id, text: newTodoItem.text, done: newTodoItem.done }]);
+      setNewTodo('');
     } catch (error) {
       console.error('Erreur lors de l\'ajout de la todo:', error);
     }
   };
 
   const toggleTodo = async (todoId: number, currentDone: boolean) => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/checklist/${todoId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          done: !currentDone,
-        }),
-      });
-
-      if (res.ok) {
-        setTodos(prev =>
-          prev.map(todo =>
-            todo.id === todoId ? { ...todo, done: !currentDone } : todo
-          )
-        );
-      }
+      await updateChecklistItem(todoId, { done: !currentDone });
+      setTodos(prev =>
+        prev.map(todo => (todo.id === todoId ? { ...todo, done: !currentDone } : todo))
+      );
     } catch (error) {
       console.error('Erreur lors de la mise à jour de la todo:', error);
     }
   };
 
   const deleteTodo = async (todoId: number) => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/gantt/checklist/${todoId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (res.ok) {
-        setTodos(prev => prev.filter(todo => todo.id !== todoId));
-      }
+      await deleteChecklistItem(todoId);
+      setTodos(prev => prev.filter(todo => todo.id !== todoId));
     } catch (error) {
       console.error('Erreur lors de la suppression de la todo:', error);
     }

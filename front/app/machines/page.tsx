@@ -6,18 +6,20 @@ import { Cpu, LogOut, User, Sun, Moon, Calendar, CheckSquare, Package, BarChart3
 import Notification, { useNotification } from '../components/Notification';
 import HamburgerMenu from '../components/HamburgerMenu';
 import ProfileAvatar from '../components/ProfileAvatar';
+import AuthGuard from '../components/AuthGuard';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function MachinesMenu() {
   const router = useRouter();
   const { notification, showNotification, hideNotification } = useNotification();
-  const [role, setRole] = useState<string | null>(null);
-  const [checking, setChecking] = useState(true);
-  const [fullName, setFullName] = useState<string>("");
-  const [username, setUsername] = useState<string>("");
+  const { profile, signOut, isAdmin } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   
   const menuRef = useRef<HTMLDivElement>(null);
+  
+  const fullName = profile ? `${profile.first_name} ${profile.last_name}`.trim() : '';
+  const username = profile?.email?.split('@')[0] || '';
 
   // Gérer le thème au chargement
   useEffect(() => {
@@ -51,62 +53,17 @@ export default function MachinesMenu() {
     document.documentElement.classList.toggle('dark', newDarkMode);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
+  const handleLogout = async () => {
+    await signOut();
     showNotification('success', 'Déconnexion', 'Vous avez été déconnecté avec succès.');
     setTimeout(() => {
       router.replace("/login");
     }, 1500);
   };
 
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      showNotification('error', 'Accès refusé', 'Vous devez être connecté pour accéder à cette page.');
-      router.replace("/login");
-      return;
-    }
-
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    .then(async res => {
-      if (!res.ok) throw new Error();
-      const user = await res.json();
-      setRole(user.is_superuser ? "admin" : "user");
-      setFullName(`${user.first_name} ${user.last_name}`.trim());
-      setUsername(user.username);
-      setChecking(false);
-      
-      // Vérifier si l'utilisateur est admin pour cette page
-      if (!user.is_superuser) {
-        showNotification('error', 'Accès refusé', 'Vous devez être administrateur pour accéder à cette page.');
-        router.replace('/dashboard');
-        return;
-      }
-    })
-    .catch(() => {
-      showNotification('error', 'Erreur de session', 'Votre session a expiré. Veuillez vous reconnecter.');
-      setTimeout(() => {
-        router.replace("/login");
-      }, 2000);
-    });
-  }, [router, showNotification]);
-
-  if (checking) {
-    return (
-      <main className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 dark:from-[#0f0d1a] dark:via-[#1a1628] dark:to-[#1a0f2a] flex items-center justify-center">
-        <div className="text-xl text-gray-800 dark:text-white animate-pulse">Vérification de l'authentification...</div>
-      </main>
-    );
-  }
-
-  if (!role || role !== "admin") {
-    return null;
-  }
-
   return (
-    <main className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 dark:from-[#0f0d1a] dark:via-[#1a1628] dark:to-[#1a0f2a] text-gray-800 dark:text-white p-8 relative overflow-hidden">
+    <AuthGuard requireAuth={true} requireApproved={true} requireAdmin={true}>
+      <main className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 dark:from-[#0f0d1a] dark:via-[#1a1628] dark:to-[#1a0f2a] text-gray-800 dark:text-white p-8 relative overflow-hidden">
       {/* Fond animé amélioré */}
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-40 h-40 bg-blue-400/10 rounded-full blur-xl animate-pulse" style={{ animationDelay: '0s', animationDuration: '6s' }}></div>
@@ -157,7 +114,7 @@ export default function MachinesMenu() {
                 </div>
                 <div>
                   <div className="text-sm text-gray-500 dark:text-gray-400">Rôle</div>
-                  <div className="text-gray-800 dark:text-white font-medium">{role === "admin" ? "Administrateur" : "Utilisateur"}</div>
+                  <div className="text-gray-800 dark:text-white font-medium">{isAdmin ? "Administrateur" : "Utilisateur"}</div>
                 </div>
               </div>
 
@@ -223,10 +180,7 @@ export default function MachinesMenu() {
               { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard className="w-4 h-4" /> },
               { label: "Gantt", href: "/gantt", icon: <Calendar className="w-4 h-4" /> },
               { label: "To-Do", href: "/todo", icon: <CheckSquare className="w-4 h-4" /> },
-              { label: "Analyse Financière", href: "/analyse-financiere", icon: <BarChart3 className="w-4 h-4" /> },
-              { label: "Suivi Sous-Traitance", href: "/sous-traitance", icon: <Package className="w-4 h-4" /> },
               { label: "Analyse Machines", href: "/machines", icon: <Cpu className="w-4 h-4" /> },
-              { label: "Intégration Solune", href: "/integration-solune", icon: <FileSpreadsheet className="w-4 h-4" /> },
             ]}
           />
         </div>
@@ -289,6 +243,7 @@ export default function MachinesMenu() {
         onClose={hideNotification}
       />
     </main>
+    </AuthGuard>
   );
 }
 

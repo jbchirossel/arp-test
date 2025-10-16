@@ -2,21 +2,19 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, LogOut, User, Settings, BarChart3, Calendar, CheckSquare, Link, Package, TrendingUp, Cpu, FileText, Sun, Moon, FileSpreadsheet } from 'lucide-react';
+import { LogOut, User, Settings, Calendar, CheckSquare, Cpu, FileText, Sun, Moon } from 'lucide-react';
 import Notification, { useNotification } from '../components/Notification';
 import ProfileAvatar from '../components/ProfileAvatar';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function DashboardPage() {
   const router = useRouter();
   const { notification, showNotification, hideNotification } = useNotification();
-  
-  const [role, setRole] = useState<string | null>(null);
-  const [fullName, setFullName] = useState<string>("");
-  const [username, setUsername] = useState<string>("");
+  const { user, profile, session, signOut, loading, role: userRole } = useAuth();
+
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [checking, setChecking] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState(false);
-  
+
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Gérer le thème au chargement
@@ -24,7 +22,7 @@ export default function DashboardPage() {
     const savedTheme = localStorage.getItem('theme');
     const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     const shouldBeDark = savedTheme === 'dark' || (!savedTheme && systemDark);
-    
+
     setIsDarkMode(shouldBeDark);
     document.documentElement.classList.toggle('dark', shouldBeDark);
   }, []);
@@ -37,31 +35,20 @@ export default function DashboardPage() {
     document.documentElement.classList.toggle('dark', newDarkMode);
   };
 
+  // Rediriger vers login si pas connecté
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) {
+    if (loading) return;
+
+    if (!session || !user || !profile) {
       router.replace("/login");
       return;
     }
+  }, [user, profile, session, loading, router]);
 
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    .then(async res => {
-      if (!res.ok) throw new Error();
-      const user = await res.json();
-      setRole(user.is_superuser ? "admin" : "user");
-      setFullName(`${user.first_name} ${user.last_name}`.trim());
-      setUsername(user.username);
-      setChecking(false);
-    })
-    .catch(() => {
-      showNotification('error', 'Erreur de session', 'Votre session a expiré. Veuillez vous reconnecter.');
-      setTimeout(() => {
-        router.replace("/login");
-      }, 2000);
-    });
-  }, [router, showNotification]);
+  // Calculer les informations utilisateur depuis le profil Supabase
+  const fullName = profile ? `${profile.first_name} ${profile.last_name}`.trim() : user?.email?.split('@')[0] || "Utilisateur";
+  const username = user?.email?.split('@')[0] || "user";
+  const role = userRole;
 
   // Ferme le menu si on clique en dehors
   useEffect(() => {
@@ -77,23 +64,22 @@ export default function DashboardPage() {
     }
   }, [showUserMenu]);
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
+  const handleLogout = async () => {
+    await signOut();
     showNotification('success', 'Déconnexion', 'Vous avez été déconnecté avec succès.');
     setTimeout(() => {
       router.replace("/login");
-    }, 2000);
+    }, 1500);
   };
 
-  if (checking) {
+  // Afficher le loader pendant le chargement
+  if (loading || !profile) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-[#0f0d1a] via-[#1a1628] to-[#1a0f2a] flex items-center justify-center">
         <div className="text-xl text-white animate-pulse">Chargement du menu...</div>
       </main>
     );
   }
-
-  if (!role) return null;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 dark:from-[#0f0d1a] dark:via-[#1a1628] dark:to-[#1a0f2a] text-gray-800 dark:text-white p-8 relative">
@@ -251,22 +237,6 @@ export default function DashboardPage() {
           {role === "admin" && (
             <>
               <button
-                onClick={() => router.push('/sous-traitance')}
-                className="border-2 border-gray-800 dark:border-white bg-blue-100/50 dark:bg-white/5 backdrop-blur-sm text-gray-800 dark:text-white font-semibold py-8 px-6 rounded-2xl shadow-xl text-lg hover:bg-blue-200/50 dark:hover:bg-white/10 hover:scale-105 transition-all duration-300 cursor-pointer flex flex-col items-center gap-3 group"
-              >
-                <Package className="w-8 h-8 group-hover:scale-110 transition-transform" />
-                <span>Suivi Sous-Traitance</span>
-              </button>
-
-              <button
-                onClick={() => router.push('/analyse-financiere')}
-                className="border-2 border-gray-800 dark:border-white bg-blue-100/50 dark:bg-white/5 backdrop-blur-sm text-gray-800 dark:text-white font-semibold py-8 px-6 rounded-2xl shadow-xl text-lg hover:bg-blue-200/50 dark:hover:bg-white/10 hover:scale-105 transition-all duration-300 cursor-pointer flex flex-col items-center gap-3 group"
-              >
-                <TrendingUp className="w-8 h-8 group-hover:scale-110 transition-transform" />
-                <span>Analyse Financière</span>
-              </button>
-
-              <button
                 onClick={() => router.push('/machines')}
                 className="border-2 border-gray-800 dark:border-white bg-blue-100/50 dark:bg-white/5 backdrop-blur-sm text-gray-800 dark:text-white font-semibold py-8 px-6 rounded-2xl shadow-xl text-lg hover:bg-blue-200/50 dark:hover:bg-white/10 hover:scale-105 transition-all duration-300 cursor-pointer flex flex-col items-center gap-3 group"
               >
@@ -291,14 +261,6 @@ export default function DashboardPage() {
           >
             <CheckSquare className="w-8 h-8 group-hover:scale-110 transition-transform" />
             <span>To-Do</span>
-          </button>
-
-          <button
-            onClick={() => router.push('/integration-solune')}
-            className="border-2 border-gray-800 dark:border-white bg-blue-100/50 dark:bg-white/5 backdrop-blur-sm text-gray-800 dark:text-white font-semibold py-8 px-6 rounded-2xl shadow-xl text-lg hover:bg-blue-200/50 dark:hover:bg-white/10 hover:scale-105 transition-all duration-300 cursor-pointer flex flex-col items-center gap-3 group"
-          >
-            <FileSpreadsheet className="w-8 h-8 group-hover:scale-110 transition-transform" />
-            <span>Intégration Solune</span>
           </button>
 
         </div>

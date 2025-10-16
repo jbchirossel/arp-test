@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import { AuthProvider } from './contexts/AuthContext'
 
 export const metadata: Metadata = {
   title: 'ARP - Project Management',
@@ -32,7 +33,9 @@ export default function RootLayout({
         />
       </head>
       <body>
-        {children}
+        <AuthProvider>
+          {children}
+        </AuthProvider>
       </body>
     </html>
   )
